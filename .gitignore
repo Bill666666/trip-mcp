@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.env*
+!.env.example
+.DS_Store
+playwright-report/
+test-results/
+coverage/
+*.log
+.trip-mcp/
+profiles/
+artifacts/
+jobs/
+cookies*.json
+storage-state*.json

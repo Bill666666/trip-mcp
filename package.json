@@ -1,0 +1,24 @@
+{
+  "name": "@bill666666/trip-mcp",
+  "version": "0.1.0",
+  "description": "本地运行的 Ctrip / Trip Moments 笔记查询与发布 MCP",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "bin": { "trip-mcp": "dist/cli.js" },
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "start": "node dist/cli.js",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "playwright": "1.63.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": { "@types/node": "^24.0.0", "tsx": "^4.20.0", "typescript": "^5.9.0" }
+}
