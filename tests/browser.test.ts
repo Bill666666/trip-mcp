@@ -90,6 +90,7 @@ for (const platform of ['trip', 'ctrip'] as const) {
       // A restarted service must preserve the submitted record without clicking again.
       assert.equal((await restarted.publish(job.id, true, true)).status, 'submitted');
       assert.equal(await page.evaluate(() => (window as unknown as { submits: number }).submits), 1);
+      await assert.rejects(service.prepare({ ...post, destination: '上' }), /唯一地点/);
     } finally { await service.close(); await rm(dir, { recursive: true, force: true }); }
   });
 }

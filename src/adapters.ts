@@ -153,7 +153,8 @@ export class CommunityAdapter {
     const result = await poll(async (): Promise<Evidence | undefined> => {
       const id = noteId(page.url(), this.platform);
       if (id) return { status: 'submitted', url: page.url(), note_id: id, message: '已跳转到带文章 ID 的页面；尚未核验公开可见性。' };
-      const markers = page.locator('[role=alert], .ant-message, .success, .result, main, h1, h2');
+      // Do not scan the article/editor body: user text can itself contain "提交成功".
+      const markers = page.locator('[role=alert], .ant-message, .success, .result');
       const texts = await markers.allTextContents();
       if (texts.some(t => /审核中|審核中|等待审核|待審核|under review|pending review/i.test(t))) return { status: 'pending_review', message: '页面显示审核中。' };
       if (texts.some(t => /发布成功|發佈成功|提交成功|successfully (?:posted|published|submitted)/i.test(t))) return { status: 'submitted', message: '页面显示提交成功；尚未核验公开可见性。' };
