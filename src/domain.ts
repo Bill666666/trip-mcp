@@ -59,7 +59,8 @@ export function renderedContent(post: Post): string {
   return post.content + (post.tags.length ? '\n\n' + post.tags.map(t => '#' + t.replace(/^#+/, '')).join(' ') : '');
 }
 export async function validatePost(post: Post): Promise<{ post: Post; fingerprint: string }> {
-  if (post.platform === 'ctrip' && Array.from(post.title).length >= 20) fail('TITLE_TOO_LONG', '国内站标题须少于 20 字；此规则仍需随网站更新核验。');
+  if (post.platform === 'ctrip' && Array.from(post.title).length > 30) fail('TITLE_TOO_LONG', '国内站首版标题上限按当前页面建议设为 30 字。');
+  if (post.platform === 'ctrip' && Array.from(renderedContent(post)).length > 3000) fail('CONTENT_TOO_LONG', '国内站正文和话题合计不得超过 3000 字。');
   const hashes: string[] = [];
   const images: string[] = [];
   for (const input of post.images) {

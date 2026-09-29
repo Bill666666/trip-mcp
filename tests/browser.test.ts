@@ -14,23 +14,23 @@ function fixture(platform: 'trip' | 'ctrip') {
   const trip = platform === 'trip';
   return `<!doctype html><html><body>
     ${trip ? '<a id="headerCoins">Coins</a>' : '<div>创作中心</div>'}
-    <input placeholder="新增標題，更大機會成為高質貼文！">
-    <div id="textarea" contenteditable="true"></div>
-    <div id="location"><input placeholder="請選取一個地點"><ul id="scrollDom" style="display:none"><li><p class="right"><span>上海</span><span class="subtitle">中國</span></p></li><li><p class="right"><span>上海酒店</span><span>中國</span></p></li></ul></div>
-    ${trip ? '' : '<input class="ant-select-selection-search-input"><div class="ant-select-item-option" style="display:none"><span class="ant-select-item-option-content">上海</span></div>'}
+    ${trip ? '<input placeholder="新增標題，更大機會成為高質貼文！"><div id="textarea" contenteditable="true"></div>' : '<div role="textbox" contenteditable="true"></div><div role="combobox" contenteditable="true"></div>'}
+    ${trip ? '<div id="location"><input placeholder="請選取一個地點"><ul id="scrollDom" style="display:none"><li><p class="right"><span>上海</span><span class="subtitle">中國</span></p></li><li><p class="right"><span>上海酒店</span><span>中國</span></p></li></ul></div>' : '<div class="ant-select ant-select-multiple"><input readonly class="ant-select-selection-search-input"><span>请输入地理位置</span></div><div class="search-input-detail"><div class="item-c" style="display:none"><span class="title">上海</span></div></div><div class="ant-select"><input readonly class="ant-select-selection-search-input"><span>请选择内容类型声明</span></div>'}
     <input type="file" accept="image/png" multiple><p class="current-total">0 / 20</p><div id="uploads"></div>
     <img class="checkbox-icon" alt="tripshoot-checkbox_unselected" width="20" height="20" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5H0AAAAASUVORK5CYII=">
     ${trip ? '<div class="submit">提交</div>' : '<button>发 布</button>'}<div role="alert" id="result"></div>
     <script>
       window.submits=0;
-      document.querySelector('#location input').addEventListener('input',()=>{
-        document.querySelector('#scrollDom').style.display='block';
-        const opt=document.querySelector('.ant-select-item-option');if(opt)opt.style.display='block';
+      const locationInput=document.querySelector('#location input,.ant-select-multiple input');
+      const multi=document.querySelector('.ant-select-multiple');if(multi)multi.onclick=()=>locationInput.readOnly=false;
+      locationInput.addEventListener('input',()=>{
+        const list=document.querySelector('#scrollDom');if(list)list.style.display='block';
+        const opt=document.querySelector('.search-input-detail .item-c');if(opt)opt.style.display='block';
       });
-      for(const li of document.querySelectorAll('li,.ant-select-item-option'))li.onclick=()=>{
-        document.querySelector('#location input').value=li.querySelector('span').textContent;
-        document.querySelector('#scrollDom').style.display='none';
-        const opt=document.querySelector('.ant-select-item-option');if(opt)opt.style.display='none';
+      for(const li of document.querySelectorAll('li,.search-input-detail .item-c'))li.onclick=()=>{
+        locationInput.value=li.querySelector('span').textContent;
+        const list=document.querySelector('#scrollDom');if(list)list.style.display='none';
+        const opt=document.querySelector('.search-input-detail .item-c');if(opt)opt.style.display='none';
       };
       document.querySelector('input[type=file]').onchange=e=>{
         document.querySelector('.current-total').textContent=e.target.files.length+' / 20';
@@ -57,10 +57,11 @@ for (const platform of ['trip', 'ctrip'] as const) {
       const [job, duplicate] = await Promise.all([service.prepare(post), service.prepare(post)]);
       assert.equal(job.status, 'prepared'); assert.equal(job.id, duplicate.id);
       const page = ctx.pages().find(p => p.url().includes('/publish/') || p.url().includes('travelphoto-publish'))!;
-      await page.locator('#textarea').fill('changed');
+      const body = await service.adapter(platform).bodyInput(page);
+      await body.fill('changed');
       await assert.rejects(service.publish(job.id, true, true), /不一致/);
       assert.equal((await store.get(job.id)).status, 'prepared');
-      await page.locator('#textarea').fill(post.content);
+      await body.fill(post.content);
       if (platform === 'trip') await assert.rejects(service.publish(job.id, true, false), /条款/);
       await assert.rejects(service.publish(job.id, false, true), /确认/);
       const [published, again] = await Promise.all([service.publish(job.id, true, true), service.publish(job.id, true, true)]);
@@ -107,5 +108,36 @@ test('查询范围明确，保留无链接卡片，详情不把摘要称为完�
     await page.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<title>测试文章</title><meta name="description" content="仅摘要">' }));
     const detail = await adapter.detail(page, 'https://hk.trip.com/moments/detail/shanghai-2-12345/');
     assert.equal(detail.extraction, 'metadata_only'); assert.equal(detail.text, '');
+  } finally { await pool.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('站点拦截单独报告，国内登录识别等待编辑器异步加载', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'trip-guard-')); const store = new Store(dir); await store.init();
+  const pool = new BrowserPool(store, true); const page = await pool.page({ platform: 'ctrip', account: 'guard' });
+  const adapter = new CommunityAdapter('ctrip', { tripOrigin: 'https://hk.trip.com', locale: 'zh-HK' });
+  try {
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<body>whaleguard block</body>' }));
+    await assert.rejects(adapter.goto(page, adapter.publishUrl), (e: unknown) => (e as {code: string}).code === 'SITE_BLOCKED');
+    await page.unroute('**/*');
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<body><input type=file><script>setTimeout(()=>{document.body.innerHTML="<input type=file><nav>游记管理</nav>"},500)</script></body>' }));
+    await adapter.goto(page, adapter.publishUrl);
+    assert.equal((await adapter.loginStatus(page)).logged_in, true);
+  } finally { await pool.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('国内列表等待零计数占位更新，提取实际卡片并保留分页范围', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'ctrip-list-')); const store = new Store(dir); await store.init();
+  const pool = new BrowserPool(store, true); const page = await pool.page({ platform: 'ctrip', account: 'list' });
+  const adapter = new CommunityAdapter('ctrip', { tripOrigin: 'https://hk.trip.com', locale: 'zh-HK' });
+  try {
+    await page.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<body><nav>游记管理</nav><div id="count">全部作品(0)</div><div class="c-m-container"></div><script>
+      setTimeout(()=>{
+        document.querySelector('#count').textContent='全部作品(19)';
+        document.querySelector('.c-m-container').innerHTML='<div class="c-m-c-container"><div class="title">上海周末</div><div class="publish-status"><span class="status">已发布</span><span class="date">2026-09-29</span></div><div>编辑 删除</div></div><div class="page">共 19 条作品 第 1 / 4页</div>';
+      },700);</script></body>` }));
+    const result = await adapter.list(page, adapter.myNotesUrl, '', 20, 0);
+    assert.equal(result.scanned, 1); assert.equal(result.notes[0]?.title, '上海周末');
+    assert.equal(result.notes[0]?.status, '已发布'); assert.equal(result.notes[0]?.url, undefined);
+    assert.deepEqual(result.pagination, { total_notes: 19, page: 1, total_pages: 4 });
   } finally { await pool.close(); await rm(dir, { recursive: true, force: true }); }
 });

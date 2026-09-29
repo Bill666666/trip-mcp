@@ -20,7 +20,7 @@ export function createServer(service: TripService) {
     platforms: ['ctrip', 'trip'], transport: 'stdio', execution: 'local_browser',
     query: ['list_notes', 'get_note', 'search_destinations'],
     publish: ['prepare_note', 'publish_note', 'get_publish_status'],
-    limitations: ['不提供全站关键词检索；list_notes.keyword 过滤已加载标题', '首版仅图文发布', '真实发布尚未验收；Trip 香港繁中编辑器已人工核对，Ctrip 需登录后验收', '其他 Trip 市场配置可用，但尚未实测'],
+    limitations: ['不提供全站关键词检索；list_notes.keyword 过滤已加载标题', '首版仅图文发布', '真实发布尚未验收；两站编辑器已核对，Ctrip 登录、列表、地点查询和文本输入通过，Trip 独立浏览器曾遇到站点拦截', '其他 Trip 市场配置可用，但尚未实测'],
     trip_origin: service.config.tripOrigin, locale: service.config.locale,
   })));
   server.registerTool('open_login', { description: '打开本地持久浏览器供用户登录；凭据只保存在本机，不向模型返回 Cookie。', inputSchema: sessionShape, annotations: write }, args => result(() => service.login(args)));
