@@ -26,6 +26,30 @@ export class CommunityAdapter {
     return this.platform === 'ctrip' ? 'https://we.ctrip.com/publish/contentManagement'
       : `${this.config.tripOrigin}/travel-guide/personal-home?locale=${encodeURIComponent(this.config.locale)}`;
   }
+  get loginUrl() {
+    return this.platform === 'trip'
+      ? `${this.config.tripOrigin}/travel-guide/?locale=${encodeURIComponent(this.config.locale)}`
+      : this.publishUrl;
+  }
+  async openPublisher(page: Page) {
+    await this.goto(page, this.loginUrl);
+    await this.requireLogin(page);
+    if (this.platform === 'trip') {
+      // Follow the site's own publishing entry with the current session and locale.
+      // A blocked page is surfaced to the user; never retry through another route.
+      const entry = await uniqueVisible([
+        page.getByText(/^(發佈|发布|Publish|Post)$/i),
+        page.locator('a[href*="/travelphoto-publish"]'),
+      ], '社区发布入口');
+      await Promise.all([
+        page.waitForURL(url => url.pathname === '/travel-guide/travelphoto-publish', { waitUntil: 'domcontentloaded' }),
+        entry.click(),
+      ]);
+      allowedUrl(page.url(), this.platform);
+      await this.guard(page);
+      await this.requireLogin(page);
+    }
+  }
   async goto(page: Page, raw: string) {
     const url = allowedUrl(raw, this.platform);
     await page.goto(url.href, { waitUntil: 'domcontentloaded' });
@@ -108,9 +132,12 @@ export class CommunityAdapter {
     })).slice(0, 30));
   }
   async prepare(page: Page, post: Post) {
-    await this.goto(page, this.publishUrl); await this.requireLogin(page);
+    await this.openPublisher(page);
     await (await this.titleInput(page)).fill(post.title);
     await (await this.bodyInput(page)).fill(renderedContent(post));
+    // Hashtags can leave a suggestions panel over the next form controls.
+    await page.keyboard.press('Escape');
+    await (await this.titleInput(page)).click();
     const options = await this.locations(page, post.destination);
     const wanted = post.destination_option;
     const candidates = options.filter(o => wanted ? o.label === wanted : o.name === post.destination);
@@ -135,9 +162,21 @@ export class CommunityAdapter {
         if (Number(count.match(/^(\d+)\s*\//)?.[1]) === post.images.length) return true;
       } else {
         if (await page.locator('.ant-upload-list-item-done, .el-upload-list__item.is-success').count() === post.images.length) return true;
+        // Ctrip's sortable cards replace "上传中" with a remote avatar image.
+        const previews = page.locator('.r-d-upload-image-container-done img[alt="avatar"]').filter({ visible: true });
+        if (await previews.count() === post.images.length
+            && !await page.getByText(/^上传中$/).filter({ visible: true }).count()
+            && await previews.evaluateAll(items => items.every(el => {
+              const img = el as HTMLImageElement;
+              return img.complete && img.naturalWidth > 0 && /^https:\/\/[^/]*\.tripcdn\.com\/images\//.test(img.src);
+            }))) return true;
       }
     }, 60000);
     if (!completed) fail('UPLOAD_UNVERIFIED', '未能核实全部图片上传完成；保留编辑页，请勿直接提交。');
+    if (this.platform === 'ctrip' && post.content_declaration) {
+      await page.locator('.ant-select:not(.ant-select-multiple)').filter({ hasText: '请选择内容类型声明' }).locator('input').click();
+      await page.getByText(post.content_declaration, { exact: true }).click();
+    }
     await this.assertContent(page, post);
     return this.formSignature(page);
   }
@@ -145,7 +184,13 @@ export class CommunityAdapter {
     const value = (input: Locator) => input.evaluate(el => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement ? el.value : (el as HTMLElement).innerText);
     const title = await value(await this.titleInput(page));
     const body = await value(await this.bodyInput(page));
-    if (title !== post.title || body.replace(/\r\n/g, '\n').trim() !== renderedContent(post).trim()) fail('FORM_MISMATCH', '网站中的标题或正文与准备内容不一致。');
+    // Trip's contenteditable adds a visual blank line when it wraps paragraphs.
+    const normalize = (text: string) => text.replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    if (title !== post.title || normalize(body) !== normalize(renderedContent(post))) fail('FORM_MISMATCH', '网站中的标题或正文与准备内容不一致。');
+    if (this.platform === 'ctrip' && post.content_declaration
+        && !await page.locator('.ant-select-selection-item').filter({ hasText: post.content_declaration }).count()) {
+      fail('FORM_MISMATCH', '内容类型声明与准备内容不一致。');
+    }
   }
   async formSignature(page: Page) {
     const data = await page.evaluate(() => ({
@@ -177,6 +222,15 @@ export class CommunityAdapter {
   }
   async evidence(page: Page): Promise<Evidence> {
     const result = await poll(async (): Promise<Evidence | undefined> => {
+      const current = new URL(page.url());
+      if (this.platform === 'trip' && current.origin === this.config.tripOrigin && current.pathname === '/travel-guide/') {
+        const raw = current.searchParams.get('publishResultJson');
+        if (raw && raw.length < 10000) {
+          try {
+            if (JSON.parse(raw).publishSuccess === 1) return { status: 'submitted', message: 'Trip.com 提交后跳转包含 publishSuccess=1；尚未核验审核或公开状态。' };
+          } catch { /* Malformed page data is not success evidence. */ }
+        }
+      }
       const id = noteId(page.url(), this.platform);
       if (id) return { status: 'submitted', url: page.url(), note_id: id, message: '已跳转到带文章 ID 的页面；尚未核验公开可见性。' };
       // Do not scan the article/editor body: user text can itself contain "提交成功".

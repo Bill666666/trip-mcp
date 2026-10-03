@@ -15,6 +15,7 @@ export const postSchema = z.object({
   images: z.array(z.string()).min(1).max(20),
   destination: z.string().trim().min(1).max(200),
   destination_option: z.string().trim().min(1).max(300).optional(),
+  content_declaration: z.enum(['内容无需声明', '内容为自行拍摄', '含AI合成内容', '含虚构演绎内容', '内容含营销信息', '内容为转载', '个人观点，仅供参考']).optional(),
   tags: z.array(z.string().trim().min(1).max(80)).max(20).default([]),
 });
 export type Post = z.infer<typeof postSchema>;

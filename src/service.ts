@@ -32,17 +32,17 @@ export class TripService {
       const key = `${session.platform}-${session.account}`;
       let page = this.loginPages.get(key);
       if (!page || page.isClosed()) { page = await this.pool.page(session); this.loginPages.set(key, page); }
-      await this.adapter(session.platform).goto(page, this.adapter(session.platform).publishUrl);
+      await this.adapter(session.platform).goto(page, this.adapter(session.platform).loginUrl);
       await page.bringToFront();
       return { status: 'awaiting_user', message: '请在本地浏览器登录，登录状态只保存在本机。完成后调用 check_login。', ...session };
     });
   }
   async checkLogin(session: Session) {
-    return this.read(session, async (page, adapter) => { await adapter.goto(page, adapter.publishUrl); return adapter.loginStatus(page); });
+    return this.read(session, async (page, adapter) => { await adapter.goto(page, adapter.loginUrl); return adapter.loginStatus(page); });
   }
   async locations(session: Session, query: string) {
     return this.read(session, async (page, adapter) => {
-      await adapter.goto(page, adapter.publishUrl); await adapter.requireLogin(page);
+      await adapter.openPublisher(page);
       return { candidates: await adapter.locations(page, query), instruction: '将所选候选的完整 label 传入 prepare_note.destination_option。' };
     });
   }
@@ -93,6 +93,10 @@ export class TripService {
         const evidence = await prepared.adapter.evidence(prepared.page);
         return await this.store.update(id, evidence);
       } catch {
+        // Navigation can interrupt a click/evidence read after the server accepted it.
+        // Observe once more without clicking or retrying the submission.
+        const evidence = await prepared.adapter.evidence(prepared.page).catch(() => undefined);
+        if (evidence && evidence.status !== 'unknown') return this.store.update(id, evidence);
         return this.store.update(id, { status: 'unknown', message: '提交阶段发生异常，结果未确认。请查看浏览器或 list_notes，禁止直接重复发布。' });
       }
     });

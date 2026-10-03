@@ -4,7 +4,7 @@
 
 **无需中央服务器。** 维护者分发代码，使用者在自己的电脑登录和运行。登录状态和发布任务留在本机；查询和上传会直接连接所选平台。
 
-> **0.1.0 为开发预览版。** 两站适配代码均已实现，并用本地浏览器模拟页面测试。Trip.com 香港站繁体中文编辑器已核对真实 DOM；Ctrip 已验证独立浏览器登录、笔记列表、地点查询及标题、正文输入。Trip.com 独立浏览器实测遇到 `whaleguard block`，登录验收尚未完成。尚未执行真实发文验收，不能把自动测试通过理解为网站发布已验证。网站页面变化可能需要更新选择器。
+> **0.1.0 为开发预览版。** 2026-10-03 已通过真实 stdio MCP 在 Ctrip 和 Trip.com 香港站各提交一篇六图笔记，并在各自的内容管理页或个人主页查到新笔记。两站当时均显示审核中；提交成功不等于审核通过或公开可见。Trip.com 现在从社区的正常发布入口进入编辑器，独立浏览器登录与地点查询已验证。网站页面变化仍可能需要更新选择器。
 
 ## 能力
 
@@ -85,7 +85,7 @@ Linux 无浏览器依赖时，可使用 `npx playwright install --with-deps chro
 {"tool":"open_login","arguments":{"platform":"trip","account":"default"}}
 ```
 
-在弹出的独立浏览器完成登录。它不会读取其他浏览器（包括 Codex 内置浏览器）的 Cookie。
+在弹出的独立浏览器完成登录。Trip.com 打开旅游攻略社区页，并从站内“發佈”入口进入编辑器，以保留当前会话和站点参数。它不会读取其他浏览器（包括 Codex 内置浏览器）的 Cookie。
 
 ```json
 {"tool":"check_login","arguments":{"platform":"trip","account":"default"}}
@@ -119,6 +119,8 @@ Linux 无浏览器依赖时，可使用 `npx playwright install --with-deps chro
 
 有同名地点时，增加 `destination_option`，值必须是地点查询返回的完整 `label`。不会默认选择第一个模糊结果。
 
+`content_declaration` 可选，仅用于携程的内容类型声明，例如 `含AI合成内容` 或 `内容为自行拍摄`。请按实际素材和创作方式选择；不传时保留网站默认状态。
+
 图片限本地 JPG、PNG、GIF，最多 20 张，单张最多 10 MiB（首版保守上限），检查文件头及重复内容。具体平台最终限制以实际页面为准。国内标题按当前页面建议，首版保守限制为最多 30 字；正文与话题合计最多 3000 字。
 
 `prepare_note` 会向平台上传图片，并返回 `job_id` 对应的 `id` 字段和本地 `screenshot` 路径。它**不会提交笔记**，也不等于保存平台草稿。请核对账号、图片、图文及地点。
@@ -145,7 +147,7 @@ preparing → prepared → submitting → submitted / pending_review / unknown
      └────────→ failed
 ```
 
-- `submitted`：检测到带文章 ID 的跳转或明确成功提示，**不等于公开可见**。
+- `submitted`：检测到带文章 ID 的跳转、Trip.com 提交成功跳转或明确成功提示，**不等于公开可见**。
 - `pending_review`：页面显示审核中。
 - `unknown`：超时、进程中断或网页结果不明确。**不要直接重发**，先查询任务和个人笔记列表。
 - 不会仅因 `publish_note` 调用完成就返回 `published`。当前没有自动确认公开状态的功能。

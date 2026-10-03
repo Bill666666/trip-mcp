@@ -13,10 +13,11 @@ import { postSchema } from '../src/domain.js';
 function fixture(platform: 'trip' | 'ctrip') {
   const trip = platform === 'trip';
   return `<!doctype html><html><body>
-    ${trip ? '<a id="headerCoins">Coins</a>' : '<div>创作中心</div>'}
+    ${trip ? '<a id="headerCoins">Coins</a><a href="/travel-guide/travelphoto-publish?locale=zh-HK&curr=HKD">發佈</a>' : '<div>创作中心</div>'}
     ${trip ? '<input placeholder="新增標題，更大機會成為高質貼文！"><div id="textarea" contenteditable="true"></div>' : '<div role="textbox" contenteditable="true"></div><div role="combobox" contenteditable="true"></div>'}
     ${trip ? '<div id="location"><input placeholder="請選取一個地點"><ul id="scrollDom" style="display:none"><li><p class="right"><span>上海</span><span class="subtitle">中國</span></p></li><li><p class="right"><span>上海酒店</span><span>中國</span></p></li></ul></div>' : '<div class="ant-select ant-select-multiple"><input readonly class="ant-select-selection-search-input"><span>请输入地理位置</span></div><div class="search-input-detail"><div class="item-c" style="display:none"><span class="title">上海</span></div></div><div class="ant-select"><input readonly class="ant-select-selection-search-input"><span>请选择内容类型声明</span></div>'}
     <input type="file" accept="image/png" multiple><p class="current-total">0 / 20</p><div id="uploads"></div>
+    ${trip ? '' : '<div id="declarations" style="display:none">含AI合成内容</div>'}
     <img class="checkbox-icon" alt="tripshoot-checkbox_unselected" width="20" height="20" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5H0AAAAASUVORK5CYII=">
     ${trip ? '<div class="submit">提交</div>' : '<button>发 布</button>'}<div role="alert" id="result"></div>
     <script>
@@ -34,8 +35,14 @@ function fixture(platform: 'trip' | 'ctrip') {
       };
       document.querySelector('input[type=file]').onchange=e=>{
         document.querySelector('.current-total').textContent=e.target.files.length+' / 20';
-        document.querySelector('#uploads').innerHTML=Array.from(e.target.files).map(()=>'<div class="ant-upload-list-item-done"></div>').join('');
+        document.querySelector('#uploads').innerHTML=Array.from(e.target.files).map((_,i)=>${trip ? "'<div class=\"ant-upload-list-item-done\"></div>'" : "'<div class=\"r-d-upload-image-container-done\" aria-roledescription=\"sortable\"><img alt=\"avatar\" src=\"https://dimg04.tripcdn.com/images/test-'+i+'.png\"></div>'"}).join('');
       };
+      const declaration=document.querySelector('#declarations');
+      if(declaration){
+        const select=document.querySelector('.ant-select:not(.ant-select-multiple)');
+        select.onclick=()=>declaration.style.display='block';
+        declaration.onclick=()=>{select.innerHTML='<span class="ant-select-selection-item">含AI合成内容</span>';declaration.style.display='none';};
+      }
       document.querySelector('.checkbox-icon').onclick=e=>e.target.alt='tripshoot-checkbox_selected';
       document.querySelector('.submit,button').onclick=()=>{window.submits++;document.querySelector('#result').textContent='提交成功';};
     </script></body></html>`;
@@ -50,17 +57,34 @@ for (const platform of ['trip', 'ctrip'] as const) {
     const session = { platform, account: 'fixture' };
     try {
       const ctx = await pool.context(session);
-      await ctx.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixture(platform) }));
+      const navigations: string[] = [];
+      await ctx.route('**/*', route => {
+        if (route.request().resourceType() === 'image') return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5H0AAAAASUVORK5CYII=', 'base64') });
+        if (route.request().isNavigationRequest()) navigations.push(route.request().url());
+        return route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixture(platform) });
+      });
       const file = path.join(dir, 'sample.png');
       await writeFile(file, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5H0AAAAASUVORK5CYII=', 'base64'));
-      const post = postSchema.parse({ ...session, title: '上海漫步', content: '真实测试正文，仅本地模拟站点。', images: [file], destination: '上海' });
+      const post = postSchema.parse({ ...session, title: '上海漫步', content: '真实测试正文。\n\n仅本地模拟站点。', images: [file], destination: '上海', ...(platform === 'ctrip' ? { content_declaration: '含AI合成内容' } : {}) });
       const [job, duplicate] = await Promise.all([service.prepare(post), service.prepare(post)]);
       assert.equal(job.status, 'prepared'); assert.equal(job.id, duplicate.id);
       const page = ctx.pages().find(p => p.url().includes('/publish/') || p.url().includes('travelphoto-publish'))!;
+      if (platform === 'trip') {
+        assert.equal(new URL(navigations[0]!).pathname, '/travel-guide/');
+        assert.equal(new URL(navigations[1]!).searchParams.get('curr'), 'HKD');
+      } else {
+        assert.equal(await page.locator('img[alt=avatar]').count(), 1);
+        assert.equal(await page.locator('.ant-select-selection-item').innerText(), '含AI合成内容');
+      }
       const body = await service.adapter(platform).bodyInput(page);
       await body.fill('changed');
       await assert.rejects(service.publish(job.id, true, true), /不一致/);
       assert.equal((await store.get(job.id)).status, 'prepared');
+      await body.fill(post.content.replace(/\n\n/g, '\n\n\n'));
+      await service.adapter(platform).assertContent(page, post);
+      // Formatting tolerance must not conceal missing words or paragraph breaks.
+      await body.fill(post.content.replace(/\n\n/g, ''));
+      await assert.rejects(service.adapter(platform).assertContent(page, post), /不一致/);
       await body.fill(post.content);
       if (platform === 'trip') await assert.rejects(service.publish(job.id, true, false), /条款/);
       await assert.rejects(service.publish(job.id, false, true), /确认/);
@@ -140,4 +164,28 @@ test('国内列表等待零计数占位更新，提取实际卡片并保留分�
     assert.equal(result.notes[0]?.status, '已发布'); assert.equal(result.notes[0]?.url, undefined);
     assert.deepEqual(result.pagination, { total_notes: 19, page: 1, total_pages: 4 });
   } finally { await pool.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+test('Trip 提交导航中断后读取成功跳转，绝不再次点击', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'trip-redirect-'));
+  const store = new Store(dir); await store.init();
+  const pool = new BrowserPool(store, true);
+  const service = new TripService(store, pool, { tripOrigin: 'https://hk.trip.com', locale: 'zh-HK' });
+  const ctx = await pool.context({ platform: 'trip', account: 'redirect' });
+  const original = CommunityAdapter.prototype.submit;
+  try {
+    await ctx.route('**/*', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: fixture('trip') }));
+    const file = path.join(dir, 'sample.png');
+    await writeFile(file, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j5H0AAAAASUVORK5CYII=', 'base64'));
+    const job = await service.prepare(postSchema.parse({ platform: 'trip', account: 'redirect', title: '导航测试', content: '测试正文', images: [file], destination: '上海' }));
+    let attempts = 0;
+    CommunityAdapter.prototype.submit = async page => {
+      attempts++;
+      await page.goto('https://hk.trip.com/travel-guide/?publishResultJson=' + encodeURIComponent(JSON.stringify({ publishSuccess: 1 })));
+      throw new Error('Navigation interrupted click observation');
+    };
+    assert.equal((await service.publish(job.id, true, true)).status, 'submitted');
+    assert.equal((await service.publish(job.id, true, true)).status, 'submitted');
+    assert.equal(attempts, 1);
+  } finally { CommunityAdapter.prototype.submit = original; await service.close(); await rm(dir, { recursive: true, force: true }); }
 });
